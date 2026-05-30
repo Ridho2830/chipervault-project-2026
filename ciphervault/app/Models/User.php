@@ -36,12 +36,15 @@ class User extends Authenticatable
 
     /**
      * Get the attributes that should be cast.
+     * Menggunakan Laravel Model Casts 'encrypted' untuk mengenkripsi 
+     * kolom 'name' secara otomatis dengan algoritma AES-256 sebelum disimpan ke DB.
      *
      * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
+            'name' => 'encrypted',
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];

@@ -14,10 +14,10 @@ return new class extends Migration
         Schema::create('encrypted_files', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->string('original_name');
-            $table->string('encrypted_name');
+            $table->text('original_name');
+            $table->text('encrypted_name');
             $table->bigInteger('file_size');
-            $table->string('mime_type', 100);
+            $table->text('mime_type');
             $table->longText('ciphertext'); // Use longText for base64 storage, conceptually LONGBLOB could be used as well but Laravel longText handles very large strings perfectly.
             $table->string('iv');
             $table->string('salt');

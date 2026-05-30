@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('secure_notes', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->string('title');
+            $table->text('title');
             $table->text('ciphertext');
             $table->string('iv');
             $table->string('salt');
