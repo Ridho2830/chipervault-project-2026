@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\EncryptedFile;
 use App\Models\ActivityLog;
+use App\Services\EncryptionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -11,7 +12,6 @@ class FileController extends Controller
 {
     /**
      * Menampilkan halaman daftar file terenkripsi milik pengguna.
-     * Lokasi fitur: Tampilan daftar file (files/index.blade.php)
      */
     public function index()
     {
@@ -21,21 +21,36 @@ class FileController extends Controller
 
     /**
      * Menangani proses penyimpanan data file yang baru dienkripsi.
-     * Menerima ciphertext dan informasi file dari klien (frontend) ke database.
      */
     public function store(Request $request)
     {
+        // 1. Validasi input: pastikan ada file yang diunggah dan password yang diberikan
         $request->validate([
-            'original_name' => 'required|string',
-            'encrypted_name' => 'required|string',
-            'file_size' => 'required|integer',
-            'mime_type' => 'required|string',
-            'ciphertext' => 'required|string',
-            'iv' => 'required|string',
-            'salt' => 'required|string',
+            'file' => 'required|file',
+            'password' => 'required|string',
         ]);
 
-        $file = Auth::user()->encryptedFiles()->create($request->all());
+        // 2. Ambil data file mentah (plaintext) dari request
+        $uploadedFile = $request->file('file');
+        $fileContent = $uploadedFile->get();
+
+        // 3. Proses enkripsi file mentah menggunakan password di sisi server
+        try {
+            $encryptedData = EncryptionService::encrypt($fileContent, $request->password);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Encryption failed'], 500);
+        }
+
+        // 4. Simpan metadata dan hasil enkripsi (ciphertext, iv, salt) ke database
+        $file = Auth::user()->encryptedFiles()->create([
+            'original_name' => $uploadedFile->getClientOriginalName(),
+            'encrypted_name' => 'enc_' . time() . '_' . $uploadedFile->getClientOriginalName(),
+            'file_size' => $uploadedFile->getSize(),
+            'mime_type' => $uploadedFile->getClientMimeType() ?: 'application/octet-stream',
+            'ciphertext' => $encryptedData['ciphertext'],
+            'iv' => $encryptedData['iv'],
+            'salt' => $encryptedData['salt'],
+        ]);
 
         ActivityLog::create([
             'user_id' => Auth::id(),
@@ -49,14 +64,33 @@ class FileController extends Controller
 
     /**
      * Menangani proses pengambilan data file untuk diunduh (didekripsi).
-     * Mengembalikan ciphertext dan kunci deskripsi ke klien (frontend).
      */
     public function download(EncryptedFile $file, Request $request)
     {
+        // 1. Pastikan file ini milik user yang sedang login
         if ($file->user_id !== Auth::id()) {
             abort(403);
         }
 
+        // 2. Validasi input password yang dikirim via POST
+        $request->validate([
+            'password' => 'required|string',
+        ]);
+
+        // 3. Proses dekripsi ciphertext dari database menggunakan password yang diberikan
+        try {
+            $plaintext = EncryptionService::decrypt(
+                $file->ciphertext,
+                $request->password,
+                $file->iv,
+                $file->salt
+            );
+        } catch (\Exception $e) {
+            // Jika gagal (password salah / data korup), kembalikan error 400
+            return response()->json(['success' => false, 'message' => 'Decryption failed. Incorrect password?'], 400);
+        }
+
+        // 4. Catat aktivitas dekripsi file ke dalam log (Audit Trail)
         ActivityLog::create([
             'user_id' => Auth::id(),
             'action' => 'decrypt_file',
@@ -64,10 +98,10 @@ class FileController extends Controller
             'user_agent' => $request->userAgent()
         ]);
 
+        // 5. Kembalikan data mentah hasil dekripsi dalam format Base64 (untuk di-handle frontend)
         return response()->json([
-            'ciphertext' => $file->ciphertext,
-            'iv' => $file->iv,
-            'salt' => $file->salt,
+            'success' => true,
+            'file_content' => base64_encode($plaintext),
             'mime_type' => $file->mime_type,
             'original_name' => $file->original_name
         ]);

@@ -22,7 +22,7 @@
                 <svg class="w-12 h-12 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             </div>
             <h3 class="text-xl font-bold text-white mb-2">Your Vault is Empty</h3>
-            <p class="text-gray-400 max-w-md mx-auto">Upload documents, images, or any sensitive files. They will be encrypted locally before leaving your browser.</p>
+            <p class="text-gray-400 max-w-md mx-auto">Upload documents, images, or any sensitive files. They will be encrypted on the server.</p>
         </div>
     @else
         <div class="overflow-x-auto">
@@ -88,7 +88,7 @@
                     </div>
                     <div>
                         <h3 class="text-xl font-bold text-white" id="modal-title">Encrypt & Upload</h3>
-                        <p class="text-xs text-blue-400">Client-Side AES-256-GCM</p>
+                        <p class="text-xs text-blue-400">Server-Side AES-256-GCM</p>
                     </div>
                 </div>
                 
@@ -135,7 +135,7 @@
                     </div>
                     <div>
                         <h3 class="text-xl font-bold text-white">Decrypt File</h3>
-                        <p class="text-xs text-emerald-400">Local Decryption Process</p>
+                        <p class="text-xs text-emerald-400">Server Decryption Process</p>
                     </div>
                 </div>
                 
@@ -152,7 +152,7 @@
                     <div class="p-6 bg-slate-900/80 rounded-2xl border border-slate-700/50 mb-6 flex flex-col items-center">
                         <svg class="w-12 h-12 text-emerald-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         <h4 class="text-lg font-bold text-white">File Decrypted Successfully</h4>
-                        <p class="text-sm text-gray-400 mt-1 mb-4">Your file was decrypted locally and is ready.</p>
+                        <p class="text-sm text-gray-400 mt-1 mb-4">Your file was decrypted on the server and is ready.</p>
                         
                         <!-- Preview Container -->
                         <div id="filePreviewContainer" class="w-full max-h-64 overflow-y-auto rounded-lg border border-slate-700 bg-slate-950 p-2 mb-4 hidden relative">
@@ -202,29 +202,21 @@
         const file = fileInput.files[0];
         const btn = document.getElementById('uploadBtn');
         const originalText = btn.innerText;
-        btn.innerText = 'Encrypting...';
+        btn.innerText = 'Encrypting & Uploading...';
         btn.disabled = true;
 
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const encryptedData = await window.CipherVault.encryptData(arrayBuffer, passwordInput.value);
-            
-            btn.innerText = 'Uploading...';
-            
-            const payload = {
-                original_name: file.name,
-                encrypted_name: 'enc_' + Date.now() + '_' + file.name,
-                file_size: file.size,
-                mime_type: file.type || 'application/octet-stream',
-                ciphertext: encryptedData.ciphertext,
-                iv: encryptedData.iv,
-                salt: encryptedData.salt
-            };
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('password', passwordInput.value);
+
+            const headers = { ...window.fetchConfig.headers };
+            delete headers['Content-Type'];
 
             const response = await fetch('{{ route("files.store") }}', {
                 method: 'POST',
-                headers: window.fetchConfig.headers,
-                body: JSON.stringify(payload)
+                headers: headers,
+                body: formData
             });
 
             const data = await response.json();
@@ -281,29 +273,30 @@
 
         const btn = document.getElementById('decryptBtn');
         const originalText = btn.innerText;
-        btn.innerText = 'Fetching...';
+        btn.innerText = 'Decrypting...';
         btn.disabled = true;
 
         try {
             const response = await fetch(`/files/${id}/download`, {
-                headers: window.fetchConfig.headers
+                method: 'POST',
+                headers: window.fetchConfig.headers,
+                body: JSON.stringify({ password: password })
             });
-            
-            if (!response.ok) throw new Error('Failed to fetch encrypted file');
             
             const data = await response.json();
             
-            btn.innerText = 'Decrypting...';
+            if (!response.ok) throw new Error(data.message || 'Failed to decrypt file');
             
-            const decryptedBuffer = await window.CipherVault.decryptData(
-                data.ciphertext, 
-                data.iv, 
-                data.salt, 
-                password,
-                false
-            );
+            btn.innerText = 'Preparing...';
             
-            const blob = new Blob([decryptedBuffer], { type: data.mime_type });
+            const byteCharacters = atob(data.file_content);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: data.mime_type });
+            
             currentObjectURL = window.URL.createObjectURL(blob);
             
             const downloadBtn = document.getElementById('downloadLinkBtn');
@@ -347,7 +340,7 @@
             
         } catch (error) {
             console.error(error);
-            window.showToast('Decryption failed. Incorrect password?', 'error');
+            window.showToast(error.message || 'Decryption failed. Incorrect password?', 'error');
         } finally {
             btn.innerText = originalText;
             btn.disabled = false;

@@ -24,11 +24,11 @@ Route::middleware('auth')->group(function () {
     
     Route::get('/files', [FileController::class, 'index'])->name('files.index');
     Route::post('/files', [FileController::class, 'store'])->name('files.store');
-    Route::get('/files/{file}/download', [FileController::class, 'download'])->name('files.download');
+    Route::post('/files/{file}/download', [FileController::class, 'download'])->name('files.download');
     Route::delete('/files/{file}', [FileController::class, 'destroy'])->name('files.destroy');
     
     Route::get('/notes', [NoteController::class, 'index'])->name('notes.index');
     Route::post('/notes', [NoteController::class, 'store'])->name('notes.store');
-    Route::get('/notes/{note}', [NoteController::class, 'show'])->name('notes.show');
+    Route::post('/notes/{note}/decrypt', [NoteController::class, 'decrypt'])->name('notes.decrypt');
     Route::delete('/notes/{note}', [NoteController::class, 'destroy'])->name('notes.destroy');
 });

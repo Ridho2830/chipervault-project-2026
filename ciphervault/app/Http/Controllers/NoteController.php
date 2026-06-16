@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\SecureNote;
 use App\Models\ActivityLog;
+use App\Services\EncryptionService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -11,7 +12,6 @@ class NoteController extends Controller
 {
     /**
      * Menampilkan halaman daftar catatan aman (secure notes) milik pengguna.
-     * Lokasi fitur: Tampilan daftar catatan (notes/index.blade.php)
      */
     public function index()
     {
@@ -21,18 +21,30 @@ class NoteController extends Controller
 
     /**
      * Menangani proses penyimpanan catatan baru yang telah dienkripsi.
-     * Menerima ciphertext dari klien (frontend) dan menyimpannya ke database.
      */
     public function store(Request $request)
     {
+        // 1. Validasi input: wajib ada judul, isi catatan (plaintext), dan password
         $request->validate([
             'title' => 'required|string|max:255',
-            'ciphertext' => 'required|string',
-            'iv' => 'required|string',
-            'salt' => 'required|string',
+            'content' => 'required|string',
+            'password' => 'required|string',
         ]);
 
-        $note = Auth::user()->secureNotes()->create($request->all());
+        // 2. Proses enkripsi isi catatan di sisi server
+        try {
+            $encryptedData = EncryptionService::encrypt($request->content, $request->password);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Encryption failed'], 500);
+        }
+
+        // 3. Simpan judul (plaintext) dan hasil enkripsi konten ke database
+        $note = Auth::user()->secureNotes()->create([
+            'title' => $request->title,
+            'ciphertext' => $encryptedData['ciphertext'],
+            'iv' => $encryptedData['iv'],
+            'salt' => $encryptedData['salt']
+        ]);
 
         ActivityLog::create([
             'user_id' => Auth::id(),
@@ -46,14 +58,32 @@ class NoteController extends Controller
 
     /**
      * Menangani proses pengambilan data spesifik untuk satu catatan (untuk didekripsi).
-     * Mengembalikan ciphertext ke klien (frontend) untuk dibuka secara lokal.
      */
-    public function show(SecureNote $note, Request $request)
+    public function decrypt(SecureNote $note, Request $request)
     {
+        // 1. Pastikan catatan ini milik user yang sedang login
         if ($note->user_id !== Auth::id()) {
             abort(403);
         }
 
+        // 2. Validasi password yang dikirim via POST
+        $request->validate([
+            'password' => 'required|string',
+        ]);
+
+        // 3. Lakukan dekripsi isi catatan dari database
+        try {
+            $plaintext = EncryptionService::decrypt(
+                $note->ciphertext,
+                $request->password,
+                $note->iv,
+                $note->salt
+            );
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Decryption failed. Incorrect password?'], 400);
+        }
+
+        // 4. Catat aktivitas pembacaan catatan rahasia ke log
         ActivityLog::create([
             'user_id' => Auth::id(),
             'action' => 'decrypt_note',
@@ -61,10 +91,10 @@ class NoteController extends Controller
             'user_agent' => $request->userAgent()
         ]);
 
+        // 5. Kembalikan isi catatan yang sudah berupa plaintext
         return response()->json([
-            'ciphertext' => $note->ciphertext,
-            'iv' => $note->iv,
-            'salt' => $note->salt,
+            'success' => true,
+            'content' => $plaintext
         ]);
     }
 

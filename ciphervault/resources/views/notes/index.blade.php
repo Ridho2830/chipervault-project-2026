@@ -74,7 +74,7 @@
                     </div>
                     <div>
                         <h3 class="text-xl font-bold text-white">Create Secure Note</h3>
-                        <p class="text-xs text-emerald-400">Content encrypted locally</p>
+                        <p class="text-xs text-emerald-400">Content encrypted on server</p>
                     </div>
                 </div>
                 
@@ -143,7 +143,7 @@
 
                 <div id="readContentSection" class="mt-4 hidden">
                     <div class="bg-slate-900/80 p-6 rounded-2xl border border-slate-700/50 shadow-inner relative">
-                        <div class="absolute top-3 right-3 text-emerald-400 tooltip" title="Decrypted locally">
+                        <div class="absolute top-3 right-3 text-emerald-400 tooltip" title="Decrypted on server">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
                         </div>
                         <div class="whitespace-pre-wrap text-gray-200 min-h-[150px] font-mono text-sm leading-relaxed" id="decryptedContent"></div>
@@ -184,19 +184,14 @@
 
         const btn = document.getElementById('createBtn');
         const originalText = btn.innerText;
-        btn.innerText = 'Encrypting...';
+        btn.innerText = 'Encrypting on server...';
         btn.disabled = true;
 
         try {
-            const encryptedData = await window.CipherVault.encryptData(content, password);
-            
-            btn.innerText = 'Saving...';
-            
             const payload = {
                 title: title,
-                ciphertext: encryptedData.ciphertext,
-                iv: encryptedData.iv,
-                salt: encryptedData.salt
+                content: content,
+                password: password
             };
 
             const response = await fetch('{{ route("notes.store") }}', {
@@ -246,27 +241,21 @@
 
         const btn = document.getElementById('readBtn');
         const originalText = btn.innerText;
-        btn.innerText = 'Fetching & Decrypting...';
+        btn.innerText = 'Decrypting...';
         btn.disabled = true;
 
         try {
-            const response = await fetch(`/notes/${id}`, {
-                headers: window.fetchConfig.headers
+            const response = await fetch(`/notes/${id}/decrypt`, {
+                method: 'POST',
+                headers: window.fetchConfig.headers,
+                body: JSON.stringify({ password: password })
             });
-            
-            if (!response.ok) throw new Error('Failed to fetch encrypted note');
             
             const data = await response.json();
             
-            const decryptedText = await window.CipherVault.decryptData(
-                data.ciphertext, 
-                data.iv, 
-                data.salt, 
-                password,
-                true 
-            );
+            if (!response.ok) throw new Error(data.message || 'Failed to decrypt note');
             
-            document.getElementById('decryptedContent').innerText = decryptedText;
+            document.getElementById('decryptedContent').innerText = data.content;
             document.getElementById('readPasswordSection').classList.add('hidden');
             document.getElementById('readContentSection').classList.remove('hidden');
             
@@ -274,7 +263,7 @@
             
         } catch (error) {
             console.error(error);
-            window.showToast('Decryption failed. Incorrect password?', 'error');
+            window.showToast(error.message || 'Decryption failed. Incorrect password?', 'error');
         } finally {
             btn.innerText = originalText;
             btn.disabled = false;
